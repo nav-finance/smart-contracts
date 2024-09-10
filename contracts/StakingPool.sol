@@ -214,6 +214,9 @@ contract StakingPool is ReentrancyGuard, Ownable {
         // Ensure no rewards are left in the pool after this user withdraws
         if (pool.totalStaked == 0) {
             pool.lastUpdateTime = block.timestamp; // Reset the reward calculation time
+        } else {
+            // Deduct the reward from the pool's total staked amount
+            pool.totalStaked -= reward;
         }
 
         require(
@@ -261,8 +264,10 @@ contract StakingPool is ReentrancyGuard, Ownable {
         uint256 timeElapsed = block.timestamp - pool.lastUpdateTime;
         uint256 rewards = (pool.totalStaked * pool.rewardRate * timeElapsed) /
             (365 days * 10000);
-        // Use rewards to update pool state or emit an event
-        pool.totalStaked += rewards; // Add rewards to the pool
+
+        // Don't add rewards to the pool's total staked amount
+        // pool.totalStaked += rewards;
+
         pool.lastUpdateTime = block.timestamp;
 
         emit PoolUpdated(poolId, rewards);
@@ -280,7 +285,7 @@ contract StakingPool is ReentrancyGuard, Ownable {
 
         if (pool.autoCompounding) {
             uint256 periods = stakingDuration / (1 days);
-            uint256 dailyRate = rewardRate / 365 / 100;
+            uint256 dailyRate = (rewardRate * REWARD_PRECISION) / (365 * 10000);
             uint256 compoundedStake = userStake;
             for (uint256 i = 0; i < periods; i++) {
                 compoundedStake +=
@@ -290,7 +295,7 @@ contract StakingPool is ReentrancyGuard, Ownable {
             return compoundedStake - userStake;
         } else {
             return
-                (userStake * rewardRate * stakingDuration) / (365 days * 100);
+                (userStake * rewardRate * stakingDuration) / (365 days * 10000);
         }
     }
 
