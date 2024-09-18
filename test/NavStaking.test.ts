@@ -5,8 +5,10 @@ import { Contract, MaxUint256, Signer, keccak256, parseEther, parseUnits, toUtf8
 describe("NavStaking Base", function () {
   let owner: Signer;
   let staker: Signer;
+  let stakerTwo: Signer;
   let ownerAddress: string;
   let stakerAddress: string;
+  let stakerTwoAddress: string;
 
   let navFinance: any;
   let navStaking: any;
@@ -19,9 +21,10 @@ describe("NavStaking Base", function () {
   const lockingPeriod = 1000;
 
   beforeEach(async function () {
-    [owner, staker] = await ethers.getSigners();
+    [owner, staker, stakerTwo] = await ethers.getSigners();
     ownerAddress = await owner.getAddress();
     stakerAddress = await staker.getAddress();
+    stakerTwoAddress = await stakerTwo.getAddress();
 
     // Deploy NavFinance
     const NavFinance = await ethers.getContractFactory("NavFinance");
@@ -46,9 +49,10 @@ describe("NavStaking Base", function () {
 
     // Mint staking tokens to staker
     await navFinance.mint(stakerAddress, parseEther("1000"));
-
+    await navFinance.mint(stakerTwoAddress, parseEther("1000"));
     // Approve staking contract
     await navFinance.connect(staker).approve(navStakingAddress, MaxUint256);
+    await navFinance.connect(stakerTwo).approve(navStakingAddress, MaxUint256);
   });
 
   it("should allow staking and minting rewards correctly", async function () {
@@ -129,5 +133,111 @@ describe("NavStaking Base", function () {
 
   it("should revert when non-admin tries to set reward ratio", async function () {
     await expect(navStaking.connect(staker).setRewardRatio(1, 2)).to.be.revertedWith("Not authorized");
+  });
+
+  describe("Withdraw", function () {
+    beforeEach(async function () {
+      await navStaking.connect(staker).stake(parseEther("400"));
+      await navStaking.connect(stakerTwo).stake(parseEther("200"));
+      await ethers.provider.send("evm_increaseTime", [1000]);
+      await ethers.provider.send("evm_mine", []);
+    });
+
+    it("should revert when withdrawing zero tokens", async function () {
+      await expect(navStaking.connect(staker).withdraw(0)).to.be.revertedWith("Withdrawing 0 tokens");
+    });
+
+    it("should revert when withdrawing more than staked", async function () {
+      await expect(navStaking.connect(staker).withdraw(parseEther("500"))).to.be.revertedWith("Withdrawing more than staked");
+    });
+  });
+
+  describe("Claim Rewards", function () {
+    beforeEach(async function () {
+      await navStaking.connect(staker).stake(parseEther("400"));
+    });
+
+    it("should allow a user to claim rewards correctly", async function () {
+      await ethers.provider.send("evm_increaseTime", [1000]);
+      await ethers.provider.send("evm_mine", []);
+
+      const rewardBalanceBefore = await navFinance.balanceOf(stakerAddress);
+      await navStaking.connect(staker).claimRewards();
+      const rewardBalanceAfter = await navFinance.balanceOf(stakerAddress);
+
+      const expectedRewards = BigInt(((1000n * 400n * BigInt(rewardRatioNumerator)) / BigInt(timeUnit)) / BigInt(rewardRatioDenominator)) * BigInt(10 ** 18);
+      expect(rewardBalanceAfter - rewardBalanceBefore).to.be.closeTo(expectedRewards, parseEther("1"));
+
+      const [tokensStaked, availableRewards] = await navStaking.getStakeInfo(stakerAddress);
+      expect(tokensStaked).to.equal(parseEther("400"));
+      expect(availableRewards).to.equal(0);
+    });
+
+    xit("should revert when claiming rewards with no rewards available", async function () {
+      await expect(navStaking.connect(staker).claimRewards()).to.be.revertedWith("No rewards");
+
+      await ethers.provider.send("evm_increaseTime", [1000]);
+      await ethers.provider.send("evm_mine", []);
+
+      await expect(navStaking.connect(staker).claimRewards()).to.be.revertedWith("No rewards");
+    });
+  });
+
+  describe("Set Reward Ratio", function () {
+    it("should allow admin to set reward ratio and update staking conditions correctly", async function () {
+      await navStaking.connect(owner).setRewardRatio(3, 70);
+      const [numerator, denominator] = await navStaking.getRewardRatio();
+      expect(numerator).to.equal(3);
+      expect(denominator).to.equal(70);
+    });
+
+    it("should revert when non-admin tries to set reward ratio", async function () {
+      await expect(navStaking.connect(staker).setRewardRatio(1, 2)).to.be.revertedWith("Not authorized");
+    });
+
+    it("should revert when denominator is zero", async function () {
+      await expect(navStaking.connect(owner).setRewardRatio(1, 0)).to.be.revertedWith("divide by 0");
+    });
+  });
+
+  describe("Set Time Unit", function () {
+    it("should allow admin to set time unit correctly", async function () {
+      await navStaking.connect(owner).setTimeUnit(100);
+      const newTimeUnit = await navStaking.getTimeUnit();
+      expect(newTimeUnit).to.equal(100);
+    });
+
+    it("should revert when non-admin tries to set time unit", async function () {
+      await expect(navStaking.connect(staker).setTimeUnit(1)).to.be.revertedWith("Not authorized");
+    });
+  });
+
+  describe("Miscellaneous", function () {
+    it("should prevent setting time unit to zero", async function () {
+      await expect(navStaking.connect(owner).setTimeUnit(0)).to.be.revertedWith("time-unit can't be 0");
+    });
+  });
+
+  describe("NavFinance Token Specifics", function () {
+    it("should have the correct name and symbol", async function () {
+      expect(await navFinance.name()).to.equal("Nav Finance");
+      expect(await navFinance.symbol()).to.equal("NAV");
+    });
+
+    it("should allow minting by the owner", async function () {
+      const initialBalance = await navFinance.balanceOf(ownerAddress);
+      await navFinance.mint(ownerAddress, parseEther("1000"));
+      const finalBalance = await navFinance.balanceOf(ownerAddress);
+      expect(finalBalance - initialBalance).to.equal(parseEther("1000"));
+    });
+
+    it("should not allow minting by non-owners", async function () {
+      try {
+        await navFinance.connect(staker).mint(stakerAddress, parseEther("1000"));
+        throw new Error("Expected to revert but did not");
+      } catch (error) {
+        expect(error).to.have.match(/AccessControlUnauthorizedAccount/);
+      }
+    });
   });
 });
