@@ -8,9 +8,9 @@ import "@thirdweb-dev/contracts/external-deps/openzeppelin/utils/math/SafeMath.s
 import "@thirdweb-dev/contracts/eip/interface/IERC20.sol";
 import {CurrencyTransferLib} from "@thirdweb-dev/contracts/lib/CurrencyTransferLib.sol";
 
-import "@thirdweb-dev/contracts/extension/interface/IStaking20.sol";
+import "./IStaking.sol";
 
-abstract contract Staking is ReentrancyGuard, IStaking20 {
+abstract contract Staking is ReentrancyGuard, IStaking {
     /*///////////////////////////////////////////////////////////////
                             State variables / Mappings
     //////////////////////////////////////////////////////////////*/
@@ -66,7 +66,7 @@ abstract contract Staking is ReentrancyGuard, IStaking20 {
      *
      *  @param _amount    Amount to stake.
      */
-    function stake(uint256 _amount) external payable nonReentrant {
+    function stake(uint256 _amount) external payable virtual nonReentrant {
         _stake(_amount);
     }
 
@@ -77,7 +77,7 @@ abstract contract Staking is ReentrancyGuard, IStaking20 {
      *
      *  @param _amount    Amount to withdraw.
      */
-    function withdraw(uint256 _amount) external nonReentrant {
+    function withdraw(uint256 _amount) external virtual nonReentrant {
         _withdraw(_amount);
     }
 
@@ -87,7 +87,7 @@ abstract contract Staking is ReentrancyGuard, IStaking20 {
      *  @dev       See {_claimRewards}. Override that to implement custom logic.
      *             See {_calculateRewards} for reward-calculation logic.
      */
-    function claimRewards() external nonReentrant {
+    function claimRewards() external virtual nonReentrant {
         _claimRewards();
     }
 
@@ -164,9 +164,15 @@ abstract contract Staking is ReentrancyGuard, IStaking20 {
      */
     function getStakeInfo(
         address _staker
-    ) external view virtual returns (uint256 _tokensStaked, uint256 _rewards) {
+    )
+        external
+        view
+        virtual
+        returns (uint256 _tokensStaked, uint256 _rewards, uint256 _blocksTime)
+    {
         _tokensStaked = stakers[_staker].amountStaked;
         _rewards = _availableRewards(_staker);
+        _blocksTime = block.timestamp - stakers[_staker].timeOfLastUpdate;
     }
 
     function getTimeUnit() public view returns (uint256 _timeUnit) {

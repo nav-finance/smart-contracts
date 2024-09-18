@@ -16,6 +16,7 @@ describe("NavStaking Base", function () {
   const timeUnit = 60;
   const rewardRatioNumerator = 1;
   const rewardRatioDenominator = 20;
+  const lockingPeriod = 1000;
 
   beforeEach(async function () {
     [owner, staker] = await ethers.getSigners();
@@ -34,7 +35,8 @@ describe("NavStaking Base", function () {
       ownerAddress,
       rewardRatioNumerator,
       rewardRatioDenominator,
-      navFinanceAddress
+      navFinanceAddress,
+      lockingPeriod
     );
     navStakingAddress = await navStaking.getAddress();
 
@@ -88,20 +90,32 @@ describe("NavStaking Base", function () {
   it("should allow withdrawing staked tokens", async function () {
     await navStaking.connect(staker).stake(parseEther("400"));
 
+    // Increase time
+    await ethers.provider.send("evm_increaseTime", [1000]);
+    await ethers.provider.send("evm_mine", []);
+
+    const [stakedTokens, availableRewards] = await navStaking.getStakeInfo(stakerAddress);
+
     await navStaking.connect(staker).withdraw(parseEther("100"));
+    await navStaking.connect(staker).claimRewards();
 
     const [finalTokensStaked, finalAvailableRewards] = await navStaking.getStakeInfo(stakerAddress);
+    expect(finalTokensStaked).to.equal(parseEther("300"), "Incorrect amount of tokens staked after withdrawal");
     expect(finalAvailableRewards).to.equal(0, "Available rewards should be 0 after claiming");
 
-    expect(await navFinance.balanceOf(navStakingAddress)).to.equal(parseEther("300"), "Incorrect balance of NavStaking contract after withdrawal");
-    expect(await navFinance.balanceOf(stakerAddress)).to.equal(parseEther("700"), "Incorrect balance of staker after withdrawal");
 
-    const stakeInfo = await navStaking.getStakeInfo(stakerAddress);
-    expect(stakeInfo.tokensStaked).to.equal(parseEther("300"), "Incorrect amount of tokens staked after withdrawal");
+    expect(await navFinance.balanceOf(navStakingAddress)).to.equal(parseEther("300"), "Incorrect balance of NavStaking contract after withdrawal");
+    expect(await navFinance.balanceOf(stakerAddress)).to.be.closeTo(parseEther("700") + availableRewards, parseEther("1"), "Incorrect balance of staker after withdrawal");
   });
 
-  it("should revert withdrawing more than staked", async function () {
+  it("should revert withdrawing more than staked only after period ends", async function () {
     await navStaking.connect(staker).stake(parseEther("400"));
+
+    await expect(navStaking.connect(staker).withdraw(parseEther("500"))).to.be.revertedWith("Locking period not expired");
+
+    // Increase time
+    await ethers.provider.send("evm_increaseTime", [1000]);
+    await ethers.provider.send("evm_mine", []);
 
     await expect(navStaking.connect(staker).withdraw(parseEther("500"))).to.be.revertedWith("Withdrawing more than staked");
   });
