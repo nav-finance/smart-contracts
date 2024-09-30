@@ -73,7 +73,7 @@ interface IStaking {
      *
      *  @param amount    Amount to stake.
      */
-    function stake(uint256 amount) external payable;
+    function stake(uint256 amount) external;
 
     /**
      *  @notice Withdraw staked tokens.

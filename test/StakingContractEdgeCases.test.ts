@@ -1,6 +1,6 @@
-import { ethers } from "hardhat";
 import { expect } from "chai";
-import { Contract, MaxUint256, Signer, keccak256, parseEther, toUtf8Bytes } from "ethers";
+import { MaxUint256, Signer, keccak256, parseEther, toUtf8Bytes } from "ethers";
+import { ethers } from "hardhat";
 
 describe("StakingContract Edge Cases", function () {
   let owner: Signer;
@@ -57,7 +57,7 @@ describe("StakingContract Edge Cases", function () {
 
   it("should not allow staking after time unit set to zero", async function () {
     // Attempt to set time unit to zero
-    await expect(navStaking.connect(owner).setTimeUnit(0)).to.be.revertedWith("time-unit can't be 0");
+    await expect(navStaking.connect(owner).setStakingTimeUnit(0)).to.be.revertedWith("time-unit can't be 0");
   });
 
   it("should handle multiple stake and withdraw operations correctly", async function () {

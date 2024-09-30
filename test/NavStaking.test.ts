@@ -1,6 +1,6 @@
-import { ethers } from "hardhat";
 import { expect } from "chai";
-import { Contract, MaxUint256, Signer, keccak256, parseEther, parseUnits, toUtf8Bytes } from "ethers";
+import { MaxUint256, Signer, keccak256, parseEther, toUtf8Bytes } from "ethers";
+import { ethers } from "hardhat";
 
 describe("NavStaking Base", function () {
   let owner: Signer;
@@ -132,7 +132,7 @@ describe("NavStaking Base", function () {
   });
 
   it("should revert when non-admin tries to set reward ratio", async function () {
-    await expect(navStaking.connect(staker).setRewardRatio(1, 2)).to.be.revertedWith("Not authorized");
+    await expect(navStaking.connect(staker).setRewardRatio(1, 2)).to.be.revertedWithCustomError(navStaking, "OwnableUnauthorized");
   });
 
   describe("Withdraw", function () {
@@ -173,13 +173,13 @@ describe("NavStaking Base", function () {
       expect(availableRewards).to.equal(0);
     });
 
-    xit("should revert when claiming rewards with no rewards available", async function () {
-      await expect(navStaking.connect(staker).claimRewards()).to.be.revertedWith("No rewards");
+    it("should revert when claiming rewards with no rewards available", async function () {
+      await expect(navStaking.connect(stakerTwo).claimRewards()).to.be.revertedWith("No rewards");
 
       await ethers.provider.send("evm_increaseTime", [1000]);
       await ethers.provider.send("evm_mine", []);
 
-      await expect(navStaking.connect(staker).claimRewards()).to.be.revertedWith("No rewards");
+      await expect(navStaking.connect(stakerTwo).claimRewards()).to.be.revertedWith("No rewards");
     });
   });
 
@@ -192,7 +192,7 @@ describe("NavStaking Base", function () {
     });
 
     it("should revert when non-admin tries to set reward ratio", async function () {
-      await expect(navStaking.connect(staker).setRewardRatio(1, 2)).to.be.revertedWith("Not authorized");
+      await expect(navStaking.connect(staker).setRewardRatio(1, 2)).to.be.revertedWithCustomError(navStaking, "OwnableUnauthorized");
     });
 
     it("should revert when denominator is zero", async function () {
@@ -202,19 +202,19 @@ describe("NavStaking Base", function () {
 
   describe("Set Time Unit", function () {
     it("should allow admin to set time unit correctly", async function () {
-      await navStaking.connect(owner).setTimeUnit(100);
+      await navStaking.connect(owner).setStakingTimeUnit(100);
       const newTimeUnit = await navStaking.getTimeUnit();
       expect(newTimeUnit).to.equal(100);
     });
 
     it("should revert when non-admin tries to set time unit", async function () {
-      await expect(navStaking.connect(staker).setTimeUnit(1)).to.be.revertedWith("Not authorized");
+      await expect(navStaking.connect(staker).setStakingTimeUnit(1)).to.be.revertedWithCustomError(navStaking, "OwnableUnauthorized");
     });
   });
 
   describe("Miscellaneous", function () {
     it("should prevent setting time unit to zero", async function () {
-      await expect(navStaking.connect(owner).setTimeUnit(0)).to.be.revertedWith("time-unit can't be 0");
+      await expect(navStaking.connect(owner).setStakingTimeUnit(0)).to.be.revertedWith("time-unit can't be 0");
     });
   });
 
@@ -238,6 +238,54 @@ describe("NavStaking Base", function () {
       } catch (error) {
         expect(error).to.have.match(/AccessControlUnauthorizedAccount/);
       }
+    });
+  });
+
+  describe("Pausing", function () {
+    beforeEach(async function () {
+      await navStaking.connect(owner).pause();
+    });
+
+    it("should allow admin to pause and unpause", async function () {
+      await expect(navStaking.connect(staker).stake(parseEther("400"))).to.be.revertedWithCustomError(navStaking, "EnforcedPause");
+      await navStaking.connect(owner).unpause();
+      await navStaking.connect(staker).stake(parseEther("400"));
+    });
+
+    it("should revert when non-admin tries to pause", async function () {
+      await expect(navStaking.connect(staker).pause()).to.be.revertedWithCustomError(navStaking, "OwnableUnauthorized");
+    });
+
+    it("should revert when non-admin tries to unpause", async function () {
+      await expect(navStaking.connect(staker).unpause()).to.be.revertedWithCustomError(navStaking, "OwnableUnauthorized");
+    });
+
+    it("should revert when trying to stake while paused", async function () {
+      await expect(navStaking.connect(staker).stake(parseEther("400"))).to.be.revertedWithCustomError(navStaking, "EnforcedPause");
+    });
+
+    it("should revert when trying to withdraw while paused", async function () {
+      await expect(navStaking.connect(staker).withdraw(parseEther("400"))).to.be.revertedWithCustomError(navStaking, "EnforcedPause");
+    });
+
+    it("should revert when trying to claim rewards while paused", async function () {
+      await expect(navStaking.connect(staker).claimRewards()).to.be.revertedWithCustomError(navStaking, "EnforcedPause");
+    });
+
+    it("should revert when trying to set reward ratio while paused", async function () {
+      await expect(navStaking.connect(owner).setRewardRatio(3, 70)).to.be.revertedWithCustomError(navStaking, "EnforcedPause");
+    });
+
+    it("should revert when trying to set time unit while paused", async function () {
+      await expect(navStaking.connect(owner).setStakingTimeUnit(100)).to.be.revertedWithCustomError(navStaking, "EnforcedPause");
+    });
+
+    it("should revert when trying to set reward ratio while paused", async function () {
+      await expect(navStaking.connect(owner).setRewardRatio(3, 70)).to.be.revertedWithCustomError(navStaking, "EnforcedPause");
+    });
+
+    it("should revert when trying to set time unit while paused", async function () {
+      await expect(navStaking.connect(owner).setStakingTimeUnit(100)).to.be.revertedWithCustomError(navStaking, "EnforcedPause");
     });
   });
 });

@@ -1,6 +1,7 @@
-import { ethers } from "hardhat";
 import { expect } from "chai";
-import { Contract, MaxUint256, Signer, keccak256, parseEther, toUtf8Bytes } from "ethers";
+import { MaxUint256, Signer, keccak256, parseEther, toUtf8Bytes } from "ethers";
+import { ethers } from "hardhat";
+import { StakingBase } from "../typechain-types";
 
 describe("StakingContract", function () {
   let owner: Signer;
@@ -14,6 +15,7 @@ describe("StakingContract", function () {
   let navStaking: any;
   let navStakingAddress: string;
   let navFinanceAddress: string;
+  let stakingBase: StakingBase;
 
   const timeUnit = 60;
   const rewardRatioNumerator = 1;
@@ -53,102 +55,109 @@ describe("StakingContract", function () {
     // Approve staking contract
     await navFinance.connect(staker).approve(navStakingAddress, MaxUint256);
     await navFinance.connect(stakerTwo).approve(navStakingAddress, MaxUint256);
+
+    // Deploy StakingBase
+    const StakingBase = await ethers.getContractFactory("StakingBase");
+    stakingBase = await StakingBase.deploy(
+      timeUnit,
+      ownerAddress,
+      rewardRatioNumerator,
+      rewardRatioDenominator,
+      navFinanceAddress,
+      navFinanceAddress // Using NavFinance as both staking and reward token for simplicity
+    );
   });
 
-  describe("Stake", function () {
-    it("should allow a user to stake tokens and update balances correctly", async function () {
-      await navStaking.connect(staker).stake(parseEther("400"));
 
-      expect(await navFinance.balanceOf(navStakingAddress)).to.equal(parseEther("400"));
-      expect(await navFinance.balanceOf(stakerAddress)).to.equal(parseEther("600"));
 
-      const [tokensStaked, availableRewards] = await navStaking.getStakeInfo(stakerAddress);
-      expect(tokensStaked).to.equal(parseEther("400"));
-      expect(availableRewards).to.equal(0);
+  describe("StakingBase", function () {
+    describe("depositRewardTokens", function () {
+      it("should allow admin to deposit reward tokens", async function () {
+        const depositAmount = parseEther("100");
+        await navFinance.mint(ownerAddress, depositAmount);
+        await navFinance.connect(owner).approve(stakingBase.getAddress(), depositAmount);
+
+        await expect(stakingBase.connect(owner).depositRewardTokens(depositAmount))
+          .to.emit(navFinance, "Transfer")
+          .withArgs(ownerAddress, await stakingBase.getAddress(), depositAmount);
+
+        expect(await stakingBase.getRewardTokenBalance()).to.equal(depositAmount);
+      });
+
+      it("should revert when non-admin tries to deposit reward tokens", async function () {
+        const depositAmount = parseEther("100");
+        await expect(stakingBase.connect(staker).depositRewardTokens(depositAmount))
+          .to.be.revertedWith("Not authorized");
+      });
     });
 
-    it("should calculate rewards correctly after time passes", async function () {
-      await navStaking.connect(staker).stake(parseEther("400"));
+    describe("withdrawRewardTokens", function () {
+      beforeEach(async function () {
+        const depositAmount = parseEther("100");
+        await navFinance.mint(ownerAddress, depositAmount);
+        await navFinance.connect(owner).approve(stakingBase.getAddress(), depositAmount);
+        await stakingBase.connect(owner).depositRewardTokens(depositAmount);
+      });
 
-      await ethers.provider.send("evm_increaseTime", [1000]);
-      await ethers.provider.send("evm_mine", []);
+      it("should allow admin to withdraw reward tokens", async function () {
+        const withdrawAmount = parseEther("50");
+        await expect(stakingBase.connect(owner).withdrawRewardTokens(withdrawAmount))
+          .to.emit(navFinance, "Transfer")
+          .withArgs(await stakingBase.getAddress(), ownerAddress, withdrawAmount);
 
-      const [tokensStaked, availableRewards] = await navStaking.getStakeInfo(stakerAddress);
-      const expectedRewards = BigInt(((BigInt(1000) * BigInt(400) * BigInt(rewardRatioNumerator)) / BigInt(timeUnit)) / BigInt(rewardRatioDenominator)) * BigInt(10 ** 18);
-      expect(availableRewards).to.be.closeTo(expectedRewards, parseEther("0.5"));
+        expect(await stakingBase.getRewardTokenBalance()).to.equal(parseEther("50"));
+      });
+
+      it("should revert when non-admin tries to withdraw reward tokens", async function () {
+        const withdrawAmount = parseEther("50");
+        await expect(stakingBase.connect(staker).withdrawRewardTokens(withdrawAmount))
+          .to.be.revertedWith("Not authorized");
+      });
+
+      it("should allow admin to withdraw all reward tokens", async function () {
+        const withdrawAmount = parseEther("100");
+        await stakingBase.connect(owner).withdrawRewardTokens(withdrawAmount);
+        expect(await stakingBase.getRewardTokenBalance()).to.equal(0);
+      });
     });
 
-    it("should revert when staking zero tokens", async function () {
-      await expect(navStaking.connect(staker).stake(0)).to.be.revertedWith("Staking 0 tokens");
-    });
-  });
+    describe("getRewardTokenBalance", function () {
+      it("should return the correct reward token balance", async function () {
+        expect(await stakingBase.getRewardTokenBalance()).to.equal(0);
 
-  describe("Withdraw", function () {
-    beforeEach(async function () {
-      await navStaking.connect(staker).stake(parseEther("400"));
-      await navStaking.connect(stakerTwo).stake(parseEther("200"));
-    });
+        const depositAmount = parseEther("100");
+        await navFinance.mint(ownerAddress, depositAmount);
+        await navFinance.connect(owner).approve(stakingBase.getAddress(), depositAmount);
+        await stakingBase.connect(owner).depositRewardTokens(depositAmount);
 
-    it("should allow a user to withdraw staked tokens and update balances correctly", async function () {
-      await ethers.provider.send("evm_increaseTime", [1000]);
-      await ethers.provider.send("evm_mine", []);
-
-      await navStaking.connect(staker).withdraw(parseEther("100"));
-
-      expect(await navFinance.balanceOf(navStakingAddress)).to.equal(parseEther("500"));
-      expect(await navFinance.balanceOf(stakerAddress)).to.equal(parseEther("700"));
-
-      const [tokensStaked, availableRewards] = await navStaking.getStakeInfo(stakerAddress);
-      expect(tokensStaked).to.equal(parseEther("300"));
+        expect(await stakingBase.getRewardTokenBalance()).to.equal(depositAmount);
+      });
     });
 
-    it("should revert when withdrawing zero tokens", async function () {
-      await ethers.provider.send("evm_increaseTime", [1000]);
-      await ethers.provider.send("evm_mine", []);
+    describe("setRewardRatio", function () {
+      it("should allow admin to set reward ratio", async function () {
+        await stakingBase.connect(owner).setRewardRatio(2, 100);
+        const [numerator, denominator] = await stakingBase.getRewardRatio();
+        expect(numerator).to.equal(2);
+        expect(denominator).to.equal(100);
+      });
 
-      await expect(navStaking.connect(staker).withdraw(0)).to.be.revertedWith("Withdrawing 0 tokens");
+      it("should revert when non-admin tries to set reward ratio", async function () {
+        await expect(stakingBase.connect(staker).setRewardRatio(2, 100))
+          .to.be.revertedWith("Not authorized");
+      });
     });
 
-    it("should revert when withdrawing more than staked", async function () {
-      await ethers.provider.send("evm_increaseTime", [1000]);
-      await ethers.provider.send("evm_mine", []);
+    describe("setStakingTimeUnit", function () {
+      it("should allow admin to set staking time unit", async function () {
+        await stakingBase.connect(owner).setStakingTimeUnit(120);
+        expect(await stakingBase.getTimeUnit()).to.equal(120);
+      });
 
-      await expect(navStaking.connect(staker).withdraw(parseEther("500"))).to.be.revertedWith("Withdrawing more than staked");
-    });
-  });
-
-  describe("Set Reward Ratio", function () {
-    it("should allow admin to set reward ratio and update staking conditions correctly", async function () {
-      await navStaking.connect(owner).setRewardRatio(3, 70);
-      const [numerator, denominator] = await navStaking.getRewardRatio();
-      expect(numerator).to.equal(3);
-      expect(denominator).to.equal(70);
-    });
-
-    it("should revert when non-admin tries to set reward ratio", async function () {
-      await expect(navStaking.connect(staker).setRewardRatio(1, 2)).to.be.revertedWith("Not authorized");
-    });
-
-    it("should revert when denominator is zero", async function () {
-      await expect(navStaking.connect(owner).setRewardRatio(1, 0)).to.be.revertedWith("divide by 0");
-    });
-  });
-
-  describe("Set Time Unit", function () {
-    it("should allow admin to set time unit correctly", async function () {
-      await navStaking.connect(owner).setTimeUnit(100);
-      const newTimeUnit = await navStaking.getTimeUnit();
-      expect(newTimeUnit).to.equal(100);
-    });
-
-    it("should revert when non-admin tries to set time unit", async function () {
-      await expect(navStaking.connect(staker).setTimeUnit(1)).to.be.revertedWith("Not authorized");
-    });
-  });
-
-  describe("Miscellaneous", function () {
-    it("should prevent setting time unit to zero", async function () {
-      await expect(navStaking.connect(owner).setTimeUnit(0)).to.be.revertedWith("time-unit can't be 0");
+      it("should revert when non-admin tries to set staking time unit", async function () {
+        await expect(stakingBase.connect(staker).setStakingTimeUnit(120))
+          .to.be.revertedWith("Not authorized");
+      });
     });
   });
 });

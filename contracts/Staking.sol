@@ -66,7 +66,7 @@ abstract contract Staking is ReentrancyGuard, IStaking {
      *
      *  @param _amount    Amount to stake.
      */
-    function stake(uint256 _amount) external payable virtual nonReentrant {
+    function stake(uint256 _amount) virtual external nonReentrant {
         _stake(_amount);
     }
 
@@ -99,7 +99,11 @@ abstract contract Staking is ReentrancyGuard, IStaking {
      *
      *  @param _timeUnit    New time unit.
      */
-    function setTimeUnit(uint80 _timeUnit) external virtual {
+    function setStakingTimeUnit(uint80 _timeUnit) external virtual {
+        _setTimeUnit(_timeUnit);
+    }
+
+    function _setTimeUnit(uint80 _timeUnit) internal virtual {
         if (!_canSetStakeConditions()) {
             revert("Not authorized");
         }
@@ -118,6 +122,13 @@ abstract contract Staking is ReentrancyGuard, IStaking {
         emit UpdatedTimeUnit(condition.timeUnit, _timeUnit);
     }
 
+    function setRewardRatio(
+        uint256 _numerator,
+        uint256 _denominator
+    ) external virtual {
+        _setRewardRatio(_numerator, _denominator);
+    }
+
     /**
      *  @notice  Set rewards per unit of time.
      *           Interpreted as (numerator/denominator) rewards per second/per day/etc based on time-unit.
@@ -129,10 +140,10 @@ abstract contract Staking is ReentrancyGuard, IStaking {
      *  @param _numerator    Reward ratio numerator.
      *  @param _denominator  Reward ratio denominator.
      */
-    function setRewardRatio(
+    function _setRewardRatio(
         uint256 _numerator,
         uint256 _denominator
-    ) external virtual {
+    ) internal virtual {
         if (!_canSetStakeConditions()) {
             revert("Not authorized");
         }
@@ -197,8 +208,6 @@ abstract contract Staking is ReentrancyGuard, IStaking {
     /// @dev Staking logic. Override to add custom logic.
     function _stake(uint256 _amount) internal virtual {
         require(_amount != 0, "Staking 0 tokens");
-
-        require(msg.value == 0, "Value not 0");
 
         if (stakers[_stakeMsgSender()].amountStaked > 0) {
             _updateUnclaimedRewardsForStaker(_stakeMsgSender());

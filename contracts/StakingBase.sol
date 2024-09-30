@@ -160,10 +160,7 @@ contract StakingBase is ContractMetadata, Multicall, Ownable, Staking {
             _amount
         );
 
-        // The withdrawal shouldn't reduce staking token balance. `>=` accounts for any accidental transfers.
-        address _stakingToken = stakingToken == CurrencyTransferLib.NATIVE_TOKEN
-            ? CurrencyTransferLib.NATIVE_TOKEN
-            : stakingToken;
+        address _stakingToken = stakingToken;
         require(
             IERC20(_stakingToken).balanceOf(address(this)) >=
                 stakingTokenBalance,
